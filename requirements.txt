@@ -2,5 +2,6 @@ fastapi
 uvicorn
 pymongo
 python-dotenv
-python-multipart
 openai
+requests
+python-multipart
