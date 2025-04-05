@@ -20,4 +20,6 @@ def home():
 async def nuevo_reporte(request: Request):
     data = await request.json()
     collection.insert_one(data)
+    result = collection.insert_one(data)
+    data["_id"] = str(result.inserted_id)
     return {"msg": "Reporte guardado", "data": data}
