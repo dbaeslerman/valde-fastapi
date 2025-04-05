@@ -1,48 +1,33 @@
 from fastapi import FastAPI, Request, Form
-from typing import Optional
 from pymongo import MongoClient
 from dotenv import load_dotenv
-import openai
 import os
+import openai
 import requests
 
 load_dotenv()
 
-app = FastAPI()
-
-# Carga variables desde el entorno (Render las inyecta automáticamente)
-openai.api_key = os.getenv("OPENAI_API_KEY")
-mongo_uri = os.getenv("MONGO_URI")from fastapi import FastAPI, Request, Form
-from typing import Optional
-from pymongo import MongoClient
-from dotenv import load_dotenv
-import openai
-import os
-import requests
-
-load_dotenv()
-app = FastAPI()
-
-# Cargar claves desde variables de entorno (definidas en Render)
+# === Variables de entorno ===
 openai.api_key = os.getenv("OPENAI_API_KEY")
 mongo_uri = os.getenv("MONGO_URI")
 twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
 twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
 
-# Conexión a MongoDB
+# === Base de datos Mongo ===
 client = MongoClient(mongo_uri)
 db = client["valde_db"]
 collection = db["reportes"]
 
-# Función para analizar mensaje con IA
+# === App FastAPI ===
+app = FastAPI()
+
+
+# === Función IA para analizar mensaje ===
 def analizar_mensaje(mensaje: str) -> str:
     prompt = f"""
-    Analiza el siguiente mensaje de un usuario:
+Analiza el siguiente mensaje de un usuario y responde con una pregunta clara si falta información (como producto, canal, o si afecta al cliente). Si todo está bien, responde con "OK".
 
-    "{mensaje}"
-
-    Si falta información como el producto, canal, o si afecta al cliente, responde con una pregunta clara para completarlo.
-    Si todo está bien, responde con "OK".
+"{mensaje}"
     """
 
     response = openai.ChatCompletion.create(
@@ -52,50 +37,47 @@ def analizar_mensaje(mensaje: str) -> str:
             {"role": "user", "content": prompt}
         ]
     )
+
     return response.choices[0].message.content.strip()
 
-# Función para responder por WhatsApp usando Twilio
+
+# === Función para responder vía WhatsApp ===
 def send_whatsapp_message(to: str, message: str):
     url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json"
-    auth = (twilio_sid, twilio_token)
-
     data = {
-        "From": "whatsapp:+14155238886",  # Número de prueba del sandbox
+        "From": "whatsapp:+14155238886",  # número del sandbox
         "To": to,
         "Body": message
     }
-
+    auth = (twilio_sid, twilio_token)
     response = requests.post(url, data=data, auth=auth)
     return response.status_code, response.text
 
-# Ruta de prueba
+
+# === Ruta base para test ===
 @app.get("/")
 def home():
     return {"msg": "Valde API funcionando 👌"}
 
-# Webhook que recibe los mensajes de WhatsApp
+
+# === Webhook de WhatsApp ===
 @app.post("/webhook")
-async def whatsapp_webhook(
-    Body: str = Form(...),
+async def recibir_mensaje(
     From: str = Form(...),
-    NumMedia: str = Form(...),
-    MediaUrl0: Optional[str] = Form(None),
-    MediaContentType0: Optional[str] = Form(None)
+    Body: str = Form(...),
+    NumMedia: str = Form(default="0")
 ):
-    data = {
-        "mensaje": Body,
-        "telefono": From,
-        "imagen_url": MediaUrl0 if int(NumMedia) > 0 else None,
-        "tipo_media": MediaContentType0 if int(NumMedia) > 0 else None
-    }
+    imagen_url = None
+    tipo_media = None
 
-    result = collection.insert_one(data)
-    data["_id"] = str(result.inserted_id)
+    if NumMedia != "0":
+        imagen_url = Form("MediaUrl0")
+        tipo_media = Form("MediaContentType0")
 
-    # Analizar con IA
+    # Analizar mensaje con IA
     respuesta_ia = analizar_mensaje(Body)
-    if respuesta_ia != "OK":
-        send_whatsapp_message(to=From, message=respuesta_ia)
 
-    return {"msg": "Mensaje recibido", "data": data}
+    # Guardar en Mongo
+    reporte = {
+        "telefono": From,
 
